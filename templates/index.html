@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% block title %}Загрузка сборщика{% endblock %}
+{% block content %}
+<section class="hero-card">
+  <div>
+    <h1>Загрузи сборщик и получи стратегии прямо в браузере</h1>
+    <p class="muted">
+      Эта версия не выгружает основной результат в Excel. Она строит удобную браузерную таблицу:
+      сортировка, поиск, детали по каждой стратегии и экспорт в CSV при необходимости.
+    </p>
+  </div>
+</section>
+
+<section class="card narrow-card">
+  <h2>1. Загрузка файла</h2>
+  <form action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data" class="form-grid">
+    <label class="field full">
+      <span>Excel-файл сборщика</span>
+      <input type="file" name="collector_file" accept=".xlsx,.xlsm,.xls" required>
+    </label>
+    <div class="full actions">
+      <button class="btn btn-primary" type="submit">Загрузить и перейти к настройкам</button>
+    </div>
+  </form>
+</section>
+
+<section class="grid-2">
+  <article class="card">
+    <h3>Что делает программа</h3>
+    <ul class="clean-list">
+      <li>автоматически ищет пары статистики Д / Г;</li>
+      <li>перебирает стратегии вида 1 / 2 / X;</li>
+      <li>считает прибыль, ROI, винрейт, серии и просадку;</li>
+      <li>отдельно показывает train/test по последним дням.</li>
+    </ul>
+  </article>
+  <article class="card">
+    <h3>Что удобнее, чем раньше</h3>
+    <ul class="clean-list">
+      <li>результат сразу в браузере;</li>
+      <li>сортировка по клику на колонку;</li>
+      <li>поиск по правилам;</li>
+      <li>детали по каждой стратегии и список матчей внутри.</li>
+    </ul>
+  </article>
+</section>
+{% endblock %}

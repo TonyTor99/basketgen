@@ -1,0 +1,80 @@
+{% extends 'base.html' %}
+{% block title %}Настройка генерации{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <h1>Настройка генерации</h1>
+      <p class="muted">Файл: <strong>{{ meta.filename }}</strong></p>
+    </div>
+  </div>
+
+  <form action="{{ url_for('generate', job_id=meta.job_id) }}" method="post" class="form-grid">
+    <div class="field">
+      <span>Фильтр по боту</span>
+      <input type="text" name="bot_filter" value="SB 1 Basket Fonbet">
+    </div>
+    <div class="field">
+      <span>Время сигнала</span>
+      <input type="number" name="signal_time" value="20">
+    </div>
+    <div class="field">
+      <span>Минимальный коэффициент</span>
+      <input type="number" step="0.01" name="min_odds" placeholder="например 1.70">
+    </div>
+    <div class="field">
+      <span>Максимальный коэффициент</span>
+      <input type="number" step="0.01" name="max_odds" placeholder="например 3.50">
+    </div>
+    <div class="field">
+      <span>Min bets</span>
+      <input type="number" name="min_bets" value="300" min="1">
+    </div>
+    <div class="field">
+      <span>Top K</span>
+      <input type="number" name="top_k" value="200" min="10" max="1000">
+    </div>
+    <div class="field">
+      <span>Holdout days</span>
+      <input type="number" name="holdout_days" value="60" min="1">
+    </div>
+    <div class="field">
+      <span>Мин. используемых признаков</span>
+      <input type="number" name="min_used_features" value="2" min="1" max="12">
+    </div>
+
+    <div class="full">
+      <div class="section-title-row">
+        <h2>Признаки</h2>
+        <div class="inline-actions">
+          <button class="btn btn-light btn-small" type="button" onclick="toggleFeatures(true)">Выбрать всё</button>
+          <button class="btn btn-light btn-small" type="button" onclick="toggleFeatures(false)">Снять всё</button>
+        </div>
+      </div>
+      <p class="muted small-gap">
+        Совет: для первого запуска держи 6-10 признаков. Так будет быстро и удобно сравнивать результаты.
+      </p>
+      <div class="feature-grid">
+        {% for item in meta.features %}
+          <label class="feature-item">
+            <input
+              type="checkbox"
+              name="features"
+              value="{{ item.name }}"
+              {% if item.name in meta.selected_feature_names %}checked{% endif %}
+            >
+            <span>
+              <strong>{{ item.name }}</strong>
+              <small>заполнено: {{ item.completeness }}%</small>
+            </span>
+          </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="full actions">
+      <button class="btn btn-primary" type="submit">Сгенерировать стратегии</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

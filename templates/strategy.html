@@ -1,0 +1,86 @@
+{% extends 'base.html' %}
+{% block title %}Детали стратегии{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-header wrap">
+    <div>
+      <h1>Стратегия #{{ strategy.strategy_id }}</h1>
+      <p class="muted">{{ strategy.rule }}</p>
+    </div>
+    <div class="inline-actions">
+      <a class="btn btn-light" href="{{ url_for('results_page', job_id=job_id) }}">Назад к таблице</a>
+    </div>
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat-card"><span>Матчи</span><strong>{{ strategy.matches }}</strong></div>
+    <div class="stat-card"><span>Profit</span><strong>{{ strategy.profit }}</strong></div>
+    <div class="stat-card"><span>ROI</span><strong>{{ strategy.roi }}%</strong></div>
+    <div class="stat-card"><span>ROI test</span><strong>{{ strategy.test.roi }}%</strong></div>
+    <div class="stat-card"><span>Win rate</span><strong>{{ strategy.win_rate }}%</strong></div>
+    <div class="stat-card"><span>Ср. кф</span><strong>{{ strategy.avg_odds }}</strong></div>
+  </div>
+
+  <div class="detail-grid">
+    <div class="detail-box">
+      <h3>Общие метрики</h3>
+      <div><strong>Победы:</strong> {{ strategy.wins }}</div>
+      <div><strong>Поражения:</strong> {{ strategy.losses }}</div>
+      <div><strong>Возвраты:</strong> {{ strategy.pushes }}</div>
+      <div><strong>+ в ряд:</strong> {{ strategy.plus_streak }}</div>
+      <div><strong>- в ряд:</strong> {{ strategy.minus_streak }}</div>
+      <div><strong>Макс просадка:</strong> {{ strategy.max_drawdown }}</div>
+      <div><strong>Макс просадка дней:</strong> {{ strategy.max_drawdown_days }}</div>
+    </div>
+    <div class="detail-box">
+      <h3>Train / Test</h3>
+      <div><strong>Train matches:</strong> {{ strategy.train.matches }}</div>
+      <div><strong>Train profit:</strong> {{ strategy.train.profit }}</div>
+      <div><strong>Train ROI:</strong> {{ strategy.train.roi }}%</div>
+      <hr>
+      <div><strong>Test matches:</strong> {{ strategy.test.matches }}</div>
+      <div><strong>Test profit:</strong> {{ strategy.test.profit }}</div>
+      <div><strong>Test ROI:</strong> {{ strategy.test.roi }}%</div>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header wrap">
+    <h2>Прибыль по месяцам</h2>
+  </div>
+  <div class="chip-list">
+    {% for month, pnl in strategy.monthly_pnl.items() %}
+      <span class="chip">{{ month }}: {{ pnl }}</span>
+    {% else %}
+      <span class="muted">Нет данных</span>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="card">
+  <div class="table-toolbar">
+    <input type="search" id="tableSearch" class="table-search" placeholder="Поиск по матчам...">
+  </div>
+  <div class="table-wrap">
+    <table id="sortableTable" class="data-table">
+      <thead>
+        <tr>
+          {% for col in columns %}
+            <th data-type="{% if col in ['Дата', 'Чемпионат', 'Команда "Хозяева"', 'Команда "Гости"', 'Прогноз', 'Результат'] %}text{% else %}num{% endif %}">{{ col }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in matches %}
+          <tr>
+            {% for col in columns %}
+              <td>{{ row[col] }}</td>
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
