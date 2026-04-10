@@ -9,38 +9,113 @@
     </div>
   </div>
 
+  {% if meta.quick_summary_error %}
+    <div class="flash error">{{ meta.quick_summary_error }}</div>
+  {% endif %}
+
+  {% set quick = meta.quick_summary or {} %}
+  {% if quick %}
+  <div class="quick-summary">
+    <h2>Быстрая сводка по файлу</h2>
+    <div class="stats-grid">
+      <div class="stat-card"><span>Всего строк</span><strong>{{ quick.rows_total }}</strong></div>
+      <div class="stat-card"><span>Мин. коэффициент</span><strong>{{ quick.odds_min if quick.odds_min is not none else '—' }}</strong></div>
+      <div class="stat-card"><span>Макс. коэффициент</span><strong>{{ quick.odds_max if quick.odds_max is not none else '—' }}</strong></div>
+      <div class="stat-card"><span>Уникальные значения времени сигнала</span><strong>{{ quick.signal_time_values|length }}</strong></div>
+    </div>
+
+    <div class="detail-grid">
+      <div class="detail-box">
+        <h3>Бот: уникальные значения</h3>
+        {% if quick.bot_counts %}
+          <div class="summary-scroll">
+            <table class="mini-table">
+              <thead>
+                <tr><th>Бот</th><th>Строк</th></tr>
+              </thead>
+              <tbody>
+                {% for item in quick.bot_counts %}
+                  <tr>
+                    <td>{{ item.value }}</td>
+                    <td>{{ item.count }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="muted">Нет заполненных значений.</p>
+        {% endif %}
+      </div>
+
+      <div class="detail-box">
+        <h3>Время сигнала</h3>
+        {% if quick.signal_time_values %}
+          <div class="chip-list">
+            {% for value in quick.signal_time_values %}
+              <span class="chip">{{ value }}</span>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="muted">Нет заполненных значений.</p>
+        {% endif %}
+
+        <h3 class="summary-gap">Заполненность ключевых полей</h3>
+        {% if quick.key_fields %}
+          <div class="summary-scroll">
+            <table class="mini-table">
+              <thead>
+                <tr><th>Поле</th><th>Заполнено</th><th>%</th></tr>
+              </thead>
+              <tbody>
+                {% for field in quick.key_fields %}
+                  <tr>
+                    <td>{{ field.field }}</td>
+                    <td>{{ field.filled }}</td>
+                    <td>{{ field.percent }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <form action="{{ url_for('generate', job_id=meta.job_id) }}" method="post" class="form-grid">
     <div class="field">
       <span>Фильтр по боту</span>
-      <input type="text" name="bot_filter" value="SB 1 Basket Fonbet">
+      <input type="text" name="bot_filter" value="{{ defaults.get('bot_filter', 'SB 1 Basket Fonbet') }}">
     </div>
     <div class="field">
       <span>Время сигнала</span>
-      <input type="number" name="signal_time" value="20">
+      <input type="number" name="signal_time" value="{{ defaults.get('signal_time', 20) if defaults.get('signal_time', 20) is not none else '' }}">
     </div>
     <div class="field">
       <span>Минимальный коэффициент</span>
-      <input type="number" step="0.01" name="min_odds" placeholder="например 1.70">
+      <input type="number" step="0.01" name="min_odds" value="{{ defaults.get('min_odds', '') if defaults.get('min_odds', '') is not none else '' }}" placeholder="например 1.70">
     </div>
     <div class="field">
       <span>Максимальный коэффициент</span>
-      <input type="number" step="0.01" name="max_odds" placeholder="например 3.50">
+      <input type="number" step="0.01" name="max_odds" value="{{ defaults.get('max_odds', '') if defaults.get('max_odds', '') is not none else '' }}" placeholder="например 3.50">
     </div>
     <div class="field">
       <span>Min bets</span>
-      <input type="number" name="min_bets" value="300" min="1">
+      <input type="number" name="min_bets" value="{{ defaults.get('min_bets', 300) }}" min="1">
     </div>
     <div class="field">
       <span>Top K</span>
-      <input type="number" name="top_k" value="200" min="10" max="1000">
+      <input type="number" name="top_k" value="{{ defaults.get('top_k', 200) }}" min="10" max="1000">
     </div>
     <div class="field">
       <span>Holdout days</span>
-      <input type="number" name="holdout_days" value="60" min="1">
+      <input type="number" name="holdout_days" value="{{ defaults.get('holdout_days', 60) }}" min="1">
     </div>
     <div class="field">
       <span>Мин. используемых признаков</span>
-      <input type="number" name="min_used_features" value="2" min="1" max="12">
+      <input type="number" name="min_used_features" value="{{ defaults.get('min_used_features', 2) }}" min="1" max="12">
     </div>
 
     <div class="full">

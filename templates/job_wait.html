@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+{% block title %}Выполняется генерация{% endblock %}
+{% block content %}
+<section
+  class="card narrow-card job-wait"
+  data-job-wait="true"
+  data-status-url="{{ url_for('job_status', job_id=job_id) }}"
+  data-fallback-result-url="{{ url_for('results_page', job_id=job_id) }}"
+>
+  <h1>Генерация стратегий</h1>
+  <p class="muted">Файл: <strong>{{ meta.filename }}</strong></p>
+
+  <div class="progress-block">
+    <div class="progress-head">
+      <span id="jobStageText">Подготовка...</span>
+      <strong id="jobProgressText">0%</strong>
+    </div>
+    <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="jobProgressTrack">
+      <div class="progress-fill" id="jobProgressFill"></div>
+    </div>
+    <div class="progress-message muted" id="jobMessageText">Ожидание запуска...</div>
+  </div>
+
+  <div class="wait-steps" id="jobStageList">
+    {% for step in wait_steps %}
+      <div class="wait-step" data-step-id="{{ step.id }}">
+        <span class="wait-step-index">{{ loop.index }}</span>
+        <span class="wait-step-title">{{ step.title }}</span>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="flash error hidden" id="jobErrorBox"></div>
+
+  <div class="inline-actions top-gap">
+    <a class="btn btn-light" href="{{ url_for('job_page', job_id=job_id) }}">Назад к настройкам</a>
+  </div>
+</section>
+{% endblock %}

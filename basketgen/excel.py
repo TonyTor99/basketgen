@@ -4,7 +4,7 @@ import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 import numpy as np
 import openpyxl
@@ -55,9 +55,79 @@ class HeaderInfo:
     index_by_name: dict[str, int]
 
 
+@dataclass(slots=True)
+class FilterDiagnostics:
+    rows_initial: int
+    rows_after_bot_filter: int
+    rows_after_signal_time: int
+    rows_after_min_odds: int
+    rows_after_max_odds: int
+    rows_after_required_fields: int
+    rows_final: int
+
+    def as_dict(self) -> dict[str, int]:
+        return {
+            "rows_initial": int(self.rows_initial),
+            "rows_after_bot_filter": int(self.rows_after_bot_filter),
+            "rows_after_signal_time": int(self.rows_after_signal_time),
+            "rows_after_min_odds": int(self.rows_after_min_odds),
+            "rows_after_max_odds": int(self.rows_after_max_odds),
+            "rows_after_required_fields": int(self.rows_after_required_fields),
+            "rows_final": int(self.rows_final),
+        }
+
+
+@dataclass(slots=True)
+class DatasetPreparationResult:
+    df: pd.DataFrame
+    codes: np.ndarray
+    diagnostics: FilterDiagnostics
+
+
 class ExcelFormatError(RuntimeError):
     pass
 
+
+class DatasetPreparationError(RuntimeError):
+    def __init__(self, message: str, diagnostics: FilterDiagnostics):
+        super().__init__(message)
+        self.diagnostics = diagnostics
+
+
+BASE_DATASET_COLUMNS = [
+    "Дата",
+    "Чемпионат",
+    'Команда "Хозяева"',
+    'Команда "Гости"',
+    "Прогноз",
+    "Коэффициент",
+    "Результат",
+    "Прибыль/убыток",
+    "Бот",
+    "Время сигнала",
+]
+
+REQUIRED_BASE_FIELDS = [
+    "Дата",
+    "Чемпионат",
+    'Команда "Хозяева"',
+    'Команда "Гости"',
+    "Прогноз",
+    "Коэффициент",
+    "Результат",
+    "Прибыль/убыток",
+]
+
+SUMMARY_KEY_FIELDS = [
+    "Дата",
+    "Бот",
+    "Время сигнала",
+    "Коэффициент",
+    "Результат",
+    "Прибыль/убыток",
+    'Команда "Хозяева"',
+    'Команда "Гости"',
+]
 
 
 def build_header_info(path: Path) -> HeaderInfo:
@@ -160,16 +230,96 @@ def read_subset(path: Path, header_info: HeaderInfo, columns: Iterable[str], nro
     if missing:
         raise ExcelFormatError(f"Не найдены колонки: {', '.join(missing)}")
 
-    usecols = [header_info.index_by_name[col] for col in selected]
-    names = [header_info.names[i] for i in usecols]
-    return pd.read_excel(
+    indexed = [(header_info.index_by_name[col], col) for col in selected]
+    indexed_sorted = sorted(indexed, key=lambda item: item[0])
+    usecols = [idx for idx, _ in indexed_sorted]
+    names_for_read = [name for _, name in indexed_sorted]
+
+    df = pd.read_excel(
         path,
         header=1,
-        names=names,
+        names=names_for_read,
         usecols=usecols,
         nrows=nrows,
         engine="openpyxl",
     )
+    return df[selected]
+
+
+def _filled_mask(series: pd.Series) -> pd.Series:
+    mask = series.notna()
+    if pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series):
+        stripped = series.astype(str).str.strip()
+        mask &= stripped.ne("")
+        mask &= stripped.str.lower().ne("nan")
+    return mask
+
+
+def build_quick_summary(path: Path, header_info: HeaderInfo | None = None) -> dict[str, object]:
+    header_info = header_info or build_header_info(path)
+    df = read_subset(path, header_info, BASE_DATASET_COLUMNS)
+
+    rows_total = int(len(df))
+    bots = df["Бот"]
+    bot_counts = (
+        bots[_filled_mask(bots)]
+        .astype(str)
+        .str.strip()
+        .value_counts(dropna=True)
+    )
+
+    signal_series = pd.to_numeric(df["Время сигнала"], errors="coerce").dropna()
+    signal_values: list[int | float] = []
+    for value in sorted(signal_series.unique().tolist()):
+        as_float = float(value)
+        signal_values.append(int(as_float) if as_float.is_integer() else round(as_float, 2))
+
+    odds_series = pd.to_numeric(df["Коэффициент"], errors="coerce")
+    odds_min = round(float(odds_series.min()), 3) if odds_series.notna().any() else None
+    odds_max = round(float(odds_series.max()), 3) if odds_series.notna().any() else None
+
+    key_fields: list[dict[str, object]] = []
+    for field in SUMMARY_KEY_FIELDS:
+        mask = _filled_mask(df[field])
+        filled = int(mask.sum())
+        percent = round((filled / rows_total * 100.0) if rows_total else 0.0, 2)
+        key_fields.append({"field": field, "filled": filled, "percent": percent})
+
+    return {
+        "rows_total": rows_total,
+        "bot_counts": [{"value": str(name), "count": int(count)} for name, count in bot_counts.items()],
+        "signal_time_values": signal_values,
+        "odds_min": odds_min,
+        "odds_max": odds_max,
+        "key_fields": key_fields,
+    }
+
+
+def format_filter_diagnostics(diagnostics: FilterDiagnostics) -> list[str]:
+    values = diagnostics.as_dict()
+    return [
+        f"Всего матчей: {values['rows_initial']}",
+        f"После фильтра по боту: {values['rows_after_bot_filter']}",
+        f"После фильтра по времени сигнала: {values['rows_after_signal_time']}",
+        f"После мин. коэффициента: {values['rows_after_min_odds']}",
+        f"После макс. коэффициента: {values['rows_after_max_odds']}",
+        f"После удаления строк с пустыми базовыми полями: {values['rows_after_required_fields']}",
+        f"Итог: {values['rows_final']}",
+    ]
+
+
+def explain_empty_dataset(diagnostics: FilterDiagnostics) -> str:
+    if diagnostics.rows_after_bot_filter == 0:
+        return "После фильтра по боту не осталось матчей."
+    if diagnostics.rows_after_signal_time == 0:
+        return "После фильтра по времени сигнала не осталось матчей."
+    if diagnostics.rows_after_min_odds == 0 or diagnostics.rows_after_max_odds == 0:
+        return "После фильтра по коэффициентам не осталось матчей."
+    if diagnostics.rows_after_required_fields == 0:
+        return "После удаления строк с пустыми базовыми полями не осталось матчей."
+    if diagnostics.rows_final == 0:
+        return "После расчета ставок не осталось матчей."
+    return "После фильтров не осталось матчей."
 
 
 
@@ -217,7 +367,7 @@ def build_codes(df: pd.DataFrame, pairs: list[FeaturePair]) -> np.ndarray:
 
 
 
-def prepare_dataset(
+def prepare_dataset_detailed(
     path: Path,
     header_info: HeaderInfo,
     selected_pairs: list[FeaturePair],
@@ -225,22 +375,16 @@ def prepare_dataset(
     signal_time: int | None = 20,
     min_odds: float | None = None,
     max_odds: float | None = None,
-) -> tuple[pd.DataFrame, np.ndarray]:
-    base_cols = [
-        "Дата",
-        "Чемпионат",
-        'Команда "Хозяева"',
-        'Команда "Гости"',
-        "Прогноз",
-        "Коэффициент",
-        "Результат",
-        "Прибыль/убыток",
-        "Бот",
-        "Время сигнала",
-    ]
+    stage_callback: Callable[[str], None] | None = None,
+) -> DatasetPreparationResult:
     feature_cols = [pair.home_col for pair in selected_pairs] + [pair.away_col for pair in selected_pairs]
-    df = read_subset(path, header_info, base_cols + feature_cols)
 
+    if stage_callback:
+        stage_callback("reading_excel")
+    df = read_subset(path, header_info, BASE_DATASET_COLUMNS + feature_cols)
+
+    if stage_callback:
+        stage_callback("preparing_dataset")
     df["Дата"] = pd.to_datetime(df["Дата"], dayfirst=True, errors="coerce")
     df["Коэффициент"] = pd.to_numeric(df["Коэффициент"], errors="coerce")
     df["Прибыль/убыток"] = pd.to_numeric(df["Прибыль/убыток"], errors="coerce")
@@ -250,21 +394,73 @@ def prepare_dataset(
         df[pair.home_col] = pd.to_numeric(df[pair.home_col], errors="coerce")
         df[pair.away_col] = pd.to_numeric(df[pair.away_col], errors="coerce")
 
+    if stage_callback:
+        stage_callback("applying_filters")
+    rows_initial = int(len(df))
+
     if bot_filter:
-        df = df[df["Бот"].astype(str).str.contains(bot_filter, case=False, na=False)]
+        mask = df["Бот"].astype(str).str.contains(bot_filter, case=False, regex=False, na=False)
+        df = df[mask]
+    rows_after_bot_filter = int(len(df))
+
     if signal_time is not None:
         df = df[df["Время сигнала"].eq(signal_time)]
+    rows_after_signal_time = int(len(df))
+
     if min_odds is not None:
         df = df[df["Коэффициент"] >= min_odds]
+    rows_after_min_odds = int(len(df))
+
     if max_odds is not None:
         df = df[df["Коэффициент"] <= max_odds]
+    rows_after_max_odds = int(len(df))
 
-    df = df.dropna(subset=["Дата", "Коэффициент", "Прибыль/убыток"])
+    df = df[_filled_mask(df["Дата"])]
+    for field in REQUIRED_BASE_FIELDS:
+        df = df[_filled_mask(df[field])]
+    rows_after_required_fields = int(len(df))
+
     df["outcome"] = [normalize_outcome(res, pnl) for res, pnl in zip(df["Результат"], df["Прибыль/убыток"])]
     df["stake"] = [estimate_stake(pnl, odds, outcome) for pnl, odds, outcome in zip(df["Прибыль/убыток"], df["Коэффициент"], df["outcome"])]
     df = df.replace([np.inf, -np.inf], np.nan)
     df = df.dropna(subset=["stake"])
     df = df.reset_index(drop=True)
+    rows_final = int(len(df))
 
+    diagnostics = FilterDiagnostics(
+        rows_initial=rows_initial,
+        rows_after_bot_filter=rows_after_bot_filter,
+        rows_after_signal_time=rows_after_signal_time,
+        rows_after_min_odds=rows_after_min_odds,
+        rows_after_max_odds=rows_after_max_odds,
+        rows_after_required_fields=rows_after_required_fields,
+        rows_final=rows_final,
+    )
+    if rows_final == 0:
+        raise DatasetPreparationError(explain_empty_dataset(diagnostics), diagnostics)
+
+    if stage_callback:
+        stage_callback("encoding_features")
     codes = build_codes(df, selected_pairs)
-    return df, codes
+    return DatasetPreparationResult(df=df, codes=codes, diagnostics=diagnostics)
+
+
+def prepare_dataset(
+    path: Path,
+    header_info: HeaderInfo,
+    selected_pairs: list[FeaturePair],
+    bot_filter: str = "",
+    signal_time: int | None = 20,
+    min_odds: float | None = None,
+    max_odds: float | None = None,
+) -> tuple[pd.DataFrame, np.ndarray]:
+    result = prepare_dataset_detailed(
+        path=path,
+        header_info=header_info,
+        selected_pairs=selected_pairs,
+        bot_filter=bot_filter,
+        signal_time=signal_time,
+        min_odds=min_odds,
+        max_odds=max_odds,
+    )
+    return result.df, result.codes

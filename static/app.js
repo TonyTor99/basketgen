@@ -52,4 +52,88 @@ function initSortableTable() {
   }
 }
 
-document.addEventListener('DOMContentLoaded', initSortableTable);
+function initJobWaitPage() {
+  const root = document.querySelector('[data-job-wait="true"]');
+  if (!root) return;
+
+  const statusUrl = root.dataset.statusUrl;
+  const fallbackResultUrl = root.dataset.fallbackResultUrl;
+  const stageText = document.getElementById('jobStageText');
+  const progressText = document.getElementById('jobProgressText');
+  const progressTrack = document.getElementById('jobProgressTrack');
+  const progressFill = document.getElementById('jobProgressFill');
+  const messageText = document.getElementById('jobMessageText');
+  const errorBox = document.getElementById('jobErrorBox');
+  const steps = Array.from(document.querySelectorAll('.wait-step'));
+
+  let stopped = false;
+
+  const setSteps = (stageId, done, error) => {
+    const currentIndex = steps.findIndex((step) => step.dataset.stepId === stageId);
+    steps.forEach((step, index) => {
+      step.classList.remove('is-active', 'is-done', 'is-error');
+      if (error && index === currentIndex) {
+        step.classList.add('is-error');
+      } else if (currentIndex >= 0 && (index < currentIndex || (done && index <= currentIndex))) {
+        step.classList.add('is-done');
+      }
+      if (!done && !error && index === currentIndex) {
+        step.classList.add('is-active');
+      }
+    });
+  };
+
+  const applyStatus = (status) => {
+    const progress = Math.max(0, Math.min(100, Number(status.progress || 0)));
+    const stageId = String(status.stage || '');
+    const done = Boolean(status.done);
+    const error = String(status.error || '');
+
+    setSteps(stageId, done, error);
+
+    const activeStep = steps.find((step) => step.dataset.stepId === stageId);
+    stageText.textContent = activeStep?.querySelector('.wait-step-title')?.textContent || stageId || 'Выполняется';
+    progressText.textContent = `${Math.round(progress)}%`;
+    progressFill.style.width = `${progress}%`;
+    progressTrack?.setAttribute('aria-valuenow', String(Math.round(progress)));
+    messageText.textContent = status.message || '';
+
+    if (error) {
+      errorBox.classList.remove('hidden');
+      errorBox.textContent = error;
+      stopped = true;
+      return;
+    }
+
+    if (done) {
+      stopped = true;
+      const resultUrl = status.result_url || fallbackResultUrl;
+      if (resultUrl) {
+        window.setTimeout(() => {
+          window.location.assign(resultUrl);
+        }, 600);
+      }
+    }
+  };
+
+  const poll = async () => {
+    if (stopped) return;
+    try {
+      const response = await fetch(statusUrl, { cache: 'no-store' });
+      const status = await response.json();
+      applyStatus(status);
+    } catch (err) {
+      messageText.textContent = 'Не удалось получить статус. Повторяю запрос...';
+    }
+    if (!stopped) {
+      window.setTimeout(poll, 1000);
+    }
+  };
+
+  poll();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  initSortableTable();
+  initJobWaitPage();
+});

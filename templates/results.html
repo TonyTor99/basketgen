@@ -27,6 +27,17 @@
     <div><strong>Min bets:</strong> {{ params.min_bets }}</div>
     <div><strong>Holdout days:</strong> {{ params.holdout_days }}</div>
   </div>
+
+  {% if params.filter_diagnostics_lines %}
+    <div class="diag-box">
+      <h3>Диагностика фильтров</h3>
+      <ul class="clean-list">
+        {% for line in params.filter_diagnostics_lines %}
+          <li>{{ line }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
 </section>
 
 <section class="card">
