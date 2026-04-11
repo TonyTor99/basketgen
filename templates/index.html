@@ -1,15 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Загрузка сборщика{% endblock %}
 {% block content %}
-<section class="hero-card">
-  <div>
-    <h1>Загрузи сборщик и получи стратегии прямо в браузере</h1>
-    <p class="muted">
-      Эта версия не выгружает основной результат в Excel. Она строит удобную браузерную таблицу:
-      сортировка, поиск, детали по каждой стратегии и экспорт в CSV при необходимости.
-    </p>
-  </div>
-</section>
 
 <section class="card narrow-card">
   <h2>1. Загрузка файла</h2>
@@ -24,24 +15,64 @@
   </form>
 </section>
 
-<section class="grid-2">
-  <article class="card">
-    <h3>Что делает программа</h3>
-    <ul class="clean-list">
-      <li>автоматически ищет пары статистики Д / Г;</li>
-      <li>перебирает стратегии вида 1 / 2 / X;</li>
-      <li>считает прибыль, ROI, винрейт, серии и просадку;</li>
-      <li>отдельно показывает train/test по последним дням.</li>
-    </ul>
-  </article>
-  <article class="card">
-    <h3>Что удобнее, чем раньше</h3>
-    <ul class="clean-list">
-      <li>результат сразу в браузере;</li>
-      <li>сортировка по клику на колонку;</li>
-      <li>поиск по правилам;</li>
-      <li>детали по каждой стратегии и список матчей внутри.</li>
-    </ul>
-  </article>
+<section class="card">
+  <div class="card-header wrap">
+    <h2>История генераций</h2>
+    <span class="muted">Всего запусков: {{ history_items|length if history_items else 0 }}</span>
+  </div>
+
+  {% if history_items %}
+    <div class="history-tools">
+      <input
+        type="search"
+        id="historySearch"
+        class="table-search history-search"
+        placeholder="Поиск по дате, файлу, параметрам..."
+      >
+      <span class="muted" id="historyVisibleCounter"></span>
+    </div>
+
+    <div class="table-wrap">
+      <table class="data-table history-table" id="historyTable">
+        <thead>
+          <tr>
+            <th>Дата</th>
+            <th>Файл</th>
+            <th>Параметры</th>
+            <th>Матчей</th>
+            <th>Стратегий</th>
+            <th>Результаты</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in history_items %}
+            <tr>
+              <td>{{ row.generated_at_label }}</td>
+              <td>{{ row.filename }}</td>
+              <td class="history-params">
+                <div><strong>Бот:</strong> {{ row.bot_filter or '—' }}</div>
+                <div><strong>Время сигнала:</strong> {{ row.signal_time if row.signal_time is not none else '—' }}</div>
+                <div><strong>Коэфф.:</strong> {{ row.odds_range_label }}</div>
+                <div><strong>Min bets / Top K:</strong> {{ row.min_bets if row.min_bets is not none else '—' }} / {{ row.top_k if row.top_k is not none else '—' }}</div>
+                <div><strong>Holdout / Мин. признаков:</strong> {{ row.holdout_days if row.holdout_days is not none else '—' }} / {{ row.min_used_features if row.min_used_features is not none else '—' }}</div>
+                <div><strong>Признаки ({{ row.selected_features_count }}):</strong> {{ row.selected_feature_names_label }}</div>
+              </td>
+              <td>{{ row.source_rows }}</td>
+              <td>{{ row.strategies_count }}</td>
+              <td>
+                {% if row.job_id %}
+                  <a class="link-btn" href="{{ url_for('results_page', job_id=row.job_id) }}">Открыть job</a>
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted">Пока нет сохраненных генераций.</p>
+  {% endif %}
 </section>
 {% endblock %}

@@ -1,5 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Результаты{% endblock %}
+{% block body_class %}results-page{% endblock %}
+{% block main_extra_class %} main-wide{% endblock %}
 {% block content %}
 <section class="card">
   <div class="card-header wrap">
@@ -13,11 +15,11 @@
     </div>
   </div>
 
-  <div class="stats-grid">
+  <div class="stats-grid stats-grid-priority">
     <div class="stat-card"><span>Стратегий</span><strong>{{ summary.strategies }}</strong></div>
-    <div class="stat-card"><span>Лучшая прибыль</span><strong>{{ summary.best_profit }}</strong></div>
-    <div class="stat-card"><span>Лучший ROI</span><strong>{{ summary.best_roi }}%</strong></div>
     <div class="stat-card"><span>Лучший ROI test</span><strong>{{ summary.best_test_roi }}%</strong></div>
+    <div class="stat-card"><span>Лучший Score</span><strong>{{ summary.best_score }}</strong></div>
+    <div class="stat-card"><span>Лучший Profit/DD</span><strong>{{ summary.best_profit_dd if summary.best_profit_dd is not none else '—' }}</strong></div>
   </div>
 
   <div class="params-box">
@@ -40,50 +42,99 @@
   {% endif %}
 </section>
 
-<section class="card">
-  <div class="table-toolbar">
-    <input type="search" id="tableSearch" class="table-search" placeholder="Поиск по правилу или цифрам...">
-    <div class="muted small-gap">Нажми на заголовок колонки для сортировки</div>
+<section class="card" id="resultsTableCard">
+  <div class="table-toolbar wrap">
+    <div class="quality-filters" id="qualityFilters">
+      <h3>Фильтр качества</h3>
+      <div class="quality-grid">
+        <label class="field">
+          <span>Min ROI %</span>
+          <input type="number" step="0.01" id="qualityMinRoi" placeholder="например 3">
+        </label>
+        <label class="field">
+          <span>Min ROI test %</span>
+          <input type="number" step="0.01" id="qualityMinRoiTest" placeholder="например 5">
+        </label>
+        <label class="field">
+          <span>Max drawdown %</span>
+          <input type="number" step="0.01" id="qualityMaxDdPct" placeholder="например 25">
+        </label>
+        <label class="field">
+          <span>Min Profit/DD</span>
+          <input type="number" step="0.01" id="qualityMinProfitDd" placeholder="например 1.2">
+        </label>
+        <label class="field">
+          <span>Min matches</span>
+          <input type="number" step="1" id="qualityMinMatches" placeholder="например 300">
+        </label>
+      </div>
+      <div class="inline-actions top-gap">
+        <button class="btn btn-light btn-small" type="button" id="qualityApplyBtn">Применить</button>
+        <button class="btn btn-light btn-small" type="button" id="qualityResetBtn">Сбросить</button>
+        <span class="muted" id="visibleRowsCounter"></span>
+      </div>
+    </div>
+
+    <div class="table-tools-right">
+      <input type="search" id="tableSearch" class="table-search" placeholder="Поиск по правилу или цифрам...">
+      <div class="inline-actions">
+        <button class="btn btn-light btn-small" type="button" id="toggleTableFullscreen">Развернуть таблицу</button>
+      </div>
+      <div class="muted small-gap">Нажми на заголовок колонки для сортировки</div>
+    </div>
   </div>
 
-  <div class="table-wrap">
-    <table id="sortableTable" class="data-table">
+  <div class="scroll-hint" id="resultsScrollHint">Таблица прокручивается вправо: колесо + Shift, drag мышкой или скроллбар сверху.</div>
+  <div class="table-scroll-top" id="resultsTopScroller"><div class="table-scroll-top-inner" id="resultsTopScrollerInner"></div></div>
+
+  <div class="table-wrap table-wrap-wide" id="resultsTableWrap" data-enhanced-scroll="true">
+    <table id="sortableTable" class="data-table results-table">
       <thead>
         <tr>
-          <th data-type="num">ID</th>
-          <th data-type="text">Правило</th>
+          <th class="sticky-col sticky-col-1" data-type="num">ID</th>
+          <th class="sticky-col sticky-col-2 rule-head" data-type="text">Правило</th>
           <th data-type="num">Матчи</th>
-          <th data-type="num">Profit</th>
-          <th data-type="num">ROI</th>
-          <th data-type="num">ROI test</th>
-          <th data-type="num">Profit test</th>
+          <th data-type="num">ROI %</th>
+          <th data-type="num">ROI test %</th>
+          <th data-type="num">Score</th>
+          <th data-type="num">Profit/DD</th>
+          <th data-type="num">Max DD %</th>
           <th data-type="num">Win rate</th>
           <th data-type="num">Ср. кф</th>
+          <th data-type="num">Profit (units)</th>
+          <th data-type="num">Profit test (units)</th>
           <th data-type="num">+ в ряд</th>
           <th data-type="num">- в ряд</th>
-          <th data-type="num">Просадка</th>
+          <th data-type="num">Просадка (units)</th>
           <th data-type="num">Дней в просадке</th>
-          <th data-type="num">Score</th>
           <th data-type="text">Детали</th>
         </tr>
       </thead>
       <tbody>
         {% for row in results %}
-        <tr>
-          <td>{{ row.strategy_id }}</td>
-          <td class="rule-cell">{{ row.rule }}</td>
+        <tr
+          data-roi="{{ row.roi }}"
+          data-roi-test="{{ row.test.roi }}"
+          data-dd-pct="{{ row.max_drawdown_pct if row.max_drawdown_pct is not none else '' }}"
+          data-profit-dd="{{ row.profit_dd_ratio if row.profit_dd_ratio is not none else '' }}"
+          data-matches="{{ row.matches }}"
+        >
+          <td class="sticky-col sticky-col-1">{{ row.strategy_id }}</td>
+          <td class="sticky-col sticky-col-2 rule-cell" title="{{ row.rule }}"><span class="rule-text">{{ row.rule }}</span></td>
           <td>{{ row.matches }}</td>
-          <td>{{ row.profit }}</td>
           <td>{{ row.roi }}</td>
           <td>{{ row.test.roi }}</td>
-          <td>{{ row.test.profit }}</td>
+          <td>{{ row.score }}</td>
+          <td>{{ row.profit_dd_ratio if row.profit_dd_ratio is not none else '—' }}</td>
+          <td>{{ row.max_drawdown_pct if row.max_drawdown_pct is not none else '—' }}</td>
           <td>{{ row.win_rate }}</td>
           <td>{{ row.avg_odds }}</td>
+          <td>{{ row.profit }}</td>
+          <td>{{ row.test.profit }}</td>
           <td>{{ row.plus_streak }}</td>
           <td>{{ row.minus_streak }}</td>
           <td>{{ row.max_drawdown }}</td>
           <td>{{ row.max_drawdown_days }}</td>
-          <td>{{ row.score }}</td>
           <td><a class="link-btn" href="{{ url_for('strategy_page', job_id=job_id, strategy_id=row.strategy_id) }}">Открыть</a></td>
         </tr>
         {% endfor %}

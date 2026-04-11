@@ -61,14 +61,47 @@ def wildcard_transform(vector: np.ndarray, feature_count: int) -> np.ndarray:
     return arr.reshape(-1)
 
 
+def _round_or_none(value: float | None, digits: int = 2) -> float | None:
+    if value is None:
+        return None
+    return round(float(value), digits)
 
-def calc_drawdown(profits: pd.Series, dates: pd.Series) -> tuple[float, int]:
+
+def calc_profit_dd_ratio(profit: float, max_drawdown: float) -> float | None:
+    dd_abs = abs(float(max_drawdown))
+    if dd_abs <= 1e-9:
+        return None
+    return float(profit) / dd_abs
+
+
+def calc_score(roi_test: float, profit_dd_ratio: float | None, max_drawdown_pct: float | None, matches: int) -> float:
+    roi_component = float(np.clip(roi_test, -200.0, 200.0))
+    ratio_component = 0.0 if profit_dd_ratio is None else float(np.tanh(float(profit_dd_ratio) / 4.0) * 100.0)
+    dd_component = -25.0 if max_drawdown_pct is None else float(max(-100.0, 100.0 - (float(max_drawdown_pct) * 2.0)))
+    stability_component = min(max(int(matches), 0) / 400.0, 1.0) * 100.0
+
+    score = (roi_component * 0.5) + (ratio_component * 0.2) + (dd_component * 0.2) + (stability_component * 0.1)
+    if matches < 150:
+        score -= float((150 - matches) * 0.15)
+    return round(float(score), 2)
+
+
+
+def calc_drawdown(profits: pd.Series, dates: pd.Series) -> tuple[float, int, float | None]:
     if profits.empty:
-        return 0.0, 0
+        return 0.0, 0, None
     equity = profits.cumsum()
     rolling_max = equity.cummax()
     drawdowns = equity - rolling_max
     max_drawdown = float(drawdowns.min())
+    min_idx = int(drawdowns.to_numpy(dtype=float).argmin())
+    peak_balance = float(rolling_max.iloc[min_idx]) if len(rolling_max) else 0.0
+    if max_drawdown == 0.0:
+        max_drawdown_pct: float | None = 0.0
+    elif peak_balance > 0:
+        max_drawdown_pct = abs(max_drawdown) / peak_balance * 100.0
+    else:
+        max_drawdown_pct = None
 
     in_dd = drawdowns < 0
     max_days = 0
@@ -81,7 +114,7 @@ def calc_drawdown(profits: pd.Series, dates: pd.Series) -> tuple[float, int]:
             start_date = None
     if start_date is not None:
         max_days = max(max_days, int((dates.iloc[-1] - start_date).days))
-    return max_drawdown, max_days
+    return max_drawdown, max_days, max_drawdown_pct
 
 
 
@@ -125,11 +158,38 @@ def matches_mask(codes: np.ndarray, digits: list[int]) -> np.ndarray:
 
 
 
-def build_monthly_pnl(df: pd.DataFrame) -> dict[str, float]:
+def build_monthly_stats(df: pd.DataFrame) -> list[dict[str, Any]]:
     if df.empty:
-        return {}
-    monthly = df.groupby(df["Дата"].dt.strftime("%m-%Y"))["Прибыль/убыток"].sum().to_dict()
-    return {str(k): round(float(v), 2) for k, v in monthly.items()}
+        return []
+
+    grouped = (
+        df.groupby(df["Дата"].dt.to_period("M"))
+        .agg(
+            matches=("Прибыль/убыток", "size"),
+            profit=("Прибыль/убыток", "sum"),
+            stake=("stake", "sum"),
+        )
+        .sort_index()
+    )
+
+    payload: list[dict[str, Any]] = []
+    for period, row in grouped.iterrows():
+        profit = float(row["profit"])
+        stake = float(row["stake"])
+        roi = (profit / stake * 100.0) if stake > 0 else 0.0
+        payload.append(
+            {
+                "month": period.strftime("%m-%Y"),
+                "matches": int(row["matches"]),
+                "profit": round(profit, 2),
+                "roi": round(roi, 2),
+            }
+        )
+    return payload
+
+
+def build_monthly_pnl(df: pd.DataFrame) -> dict[str, float]:
+    return {row["month"]: row["profit"] for row in build_monthly_stats(df)}
 
 
 
@@ -142,24 +202,71 @@ def summarize_subset(df: pd.DataFrame) -> dict[str, Any]:
             "wins": 0,
             "losses": 0,
             "pushes": 0,
+            "win_rate": 0.0,
+            "max_drawdown": 0.0,
+            "max_drawdown_pct": None,
+            "profit_dd_ratio": None,
         }
     stake = float(df["stake"].sum())
     profit = float(df["Прибыль/убыток"].sum())
+    matches = int(len(df))
+    wins = int((df["outcome"] == "win").sum())
+    losses = int((df["outcome"] == "loss").sum())
+    pushes = int((df["outcome"] == "push").sum())
+    win_rate = float(wins / matches * 100.0) if matches else 0.0
+    max_drawdown, _, max_drawdown_pct = calc_drawdown(df["Прибыль/убыток"], df["Дата"])
+    profit_dd_ratio = calc_profit_dd_ratio(profit, max_drawdown)
+
     return {
         "profit": round(profit, 2),
         "roi": round((profit / stake * 100.0) if stake > 0 else 0.0, 2),
-        "matches": int(len(df)),
-        "wins": int((df["outcome"] == "win").sum()),
-        "losses": int((df["outcome"] == "loss").sum()),
-        "pushes": int((df["outcome"] == "push").sum()),
+        "matches": matches,
+        "wins": wins,
+        "losses": losses,
+        "pushes": pushes,
+        "win_rate": round(win_rate, 2),
+        "max_drawdown": round(max_drawdown, 2),
+        "max_drawdown_pct": _round_or_none(max_drawdown_pct, 2),
+        "profit_dd_ratio": _round_or_none(profit_dd_ratio, 2),
     }
+
+
+def _strategy_matched_rows(df: pd.DataFrame, codes: np.ndarray, digits: list[int]) -> pd.DataFrame:
+    mask = matches_mask(codes, digits)
+    return df.loc[mask].copy().sort_values("Дата").reset_index(drop=True)
+
+
+def build_equity_payload(matched: pd.DataFrame, max_points: int = 1200) -> dict[str, Any]:
+    if matched.empty:
+        return {"granularity": "match", "points": []}
+
+    granularity = "match"
+    series = matched.set_index("Дата")["Прибыль/убыток"]
+    if len(series) > max_points:
+        granularity = "day"
+        series = matched.groupby(matched["Дата"].dt.floor("D"))["Прибыль/убыток"].sum()
+    if len(series) > max_points:
+        granularity = "month"
+        monthly = matched.groupby(matched["Дата"].dt.to_period("M"))["Прибыль/убыток"].sum()
+        monthly.index = monthly.index.to_timestamp()
+        series = monthly
+
+    equity = series.cumsum()
+    points: list[dict[str, Any]] = []
+    for dt_value, amount in equity.items():
+        if granularity == "match":
+            label = pd.Timestamp(dt_value).strftime("%Y-%m-%d %H:%M")
+        else:
+            label = pd.Timestamp(dt_value).strftime("%Y-%m-%d")
+        points.append({"label": label, "value": round(float(amount), 2)})
+
+    return {"granularity": granularity, "points": points}
 
 
 
 def enrich_strategy(df: pd.DataFrame, codes: np.ndarray, pattern_id: int, pairs: list[FeaturePair], holdout_days: int) -> dict[str, Any]:
     digits = decode_pattern(pattern_id, len(pairs))
-    mask = matches_mask(codes, digits)
-    matched = df.loc[mask].copy().sort_values("Дата").reset_index(drop=True)
+    matched = _strategy_matched_rows(df, codes, digits)
 
     matches = int(len(matched))
     profit = float(matched["Прибыль/убыток"].sum())
@@ -171,7 +278,11 @@ def enrich_strategy(df: pd.DataFrame, codes: np.ndarray, pattern_id: int, pairs:
     win_rate = float(win_count / matches * 100.0) if matches else 0.0
     roi = float(profit / stake * 100.0) if stake > 0 else 0.0
     max_win_streak, max_loss_streak = calc_streaks(matched["outcome"]) if matches else (0, 0)
-    max_drawdown, max_drawdown_days = calc_drawdown(matched["Прибыль/убыток"], matched["Дата"]) if matches else (0.0, 0)
+    if matches:
+        max_drawdown, max_drawdown_days, max_drawdown_pct = calc_drawdown(matched["Прибыль/убыток"], matched["Дата"])
+    else:
+        max_drawdown, max_drawdown_days, max_drawdown_pct = 0.0, 0, None
+    profit_dd_ratio = calc_profit_dd_ratio(profit, max_drawdown)
 
     cutoff = matched["Дата"].max() - timedelta(days=holdout_days) if matches else None
     train = matched[matched["Дата"] < cutoff] if matches and cutoff is not None else matched.iloc[0:0]
@@ -179,6 +290,8 @@ def enrich_strategy(df: pd.DataFrame, codes: np.ndarray, pattern_id: int, pairs:
 
     train_summary = summarize_subset(train)
     test_summary = summarize_subset(test)
+    score = calc_score(test_summary["roi"], profit_dd_ratio, max_drawdown_pct, matches)
+    monthly_stats = build_monthly_stats(matched)
 
     strategy = {
         "strategy_id": int(pattern_id),
@@ -194,11 +307,14 @@ def enrich_strategy(df: pd.DataFrame, codes: np.ndarray, pattern_id: int, pairs:
         "plus_streak": max_win_streak,
         "minus_streak": max_loss_streak,
         "max_drawdown": round(max_drawdown, 2),
+        "max_drawdown_pct": _round_or_none(max_drawdown_pct, 2),
+        "profit_dd_ratio": _round_or_none(profit_dd_ratio, 2),
         "max_drawdown_days": int(max_drawdown_days),
-        "score": round(float(roi * np.log1p(matches)), 2),
+        "score": score,
         "used_features": int(sum(d != 0 for d in digits)),
         "pattern_digits": digits,
-        "monthly_pnl": build_monthly_pnl(matched),
+        "monthly_pnl": {row["month"]: row["profit"] for row in monthly_stats},
+        "monthly_stats": monthly_stats,
         "train": train_summary,
         "test": test_summary,
     }
@@ -270,14 +386,33 @@ def search_strategies(df: pd.DataFrame, codes: np.ndarray, pairs: list[FeaturePa
         item["quick_pushes"] = int(w_pushes[pattern_id])
         results.append(item)
 
-    results.sort(key=lambda row: (row["test"]["roi"], row["score"], row["profit"], row["matches"]), reverse=True)
+    def ratio_for_sort(item: dict[str, Any]) -> float:
+        value = item.get("profit_dd_ratio")
+        return float("-inf") if value is None else float(value)
+
+    results.sort(
+        key=lambda row: (
+            row.get("score", 0.0),
+            row.get("test", {}).get("roi", 0.0),
+            ratio_for_sort(row),
+            row.get("roi", 0.0),
+            row.get("matches", 0),
+        ),
+        reverse=True,
+    )
     return results[: params.top_k]
+
+
+def strategy_equity_payload(df: pd.DataFrame, codes: np.ndarray, strategy: dict[str, Any], max_points: int = 1200) -> dict[str, Any]:
+    digits = list(strategy["pattern_digits"])
+    matched = _strategy_matched_rows(df, codes, digits)
+    return build_equity_payload(matched, max_points=max_points)
 
 
 
 def strategy_matches(df: pd.DataFrame, codes: np.ndarray, strategy: dict[str, Any]) -> pd.DataFrame:
     digits = list(strategy["pattern_digits"])
-    mask = matches_mask(codes, digits)
+    matched = _strategy_matched_rows(df, codes, digits)
     cols = [
         "Дата",
         "Чемпионат",
@@ -288,6 +423,6 @@ def strategy_matches(df: pd.DataFrame, codes: np.ndarray, strategy: dict[str, An
         "Результат",
         "Прибыль/убыток",
     ]
-    matched = df.loc[mask, cols].copy().sort_values("Дата", ascending=False)
-    matched["Дата"] = matched["Дата"].dt.strftime("%d.%m.%Y %H:%M")
-    return matched.reset_index(drop=True)
+    out = matched.loc[:, cols].copy().sort_values("Дата", ascending=False)
+    out["Дата"] = out["Дата"].dt.strftime("%d.%m.%Y %H:%M")
+    return out.reset_index(drop=True)

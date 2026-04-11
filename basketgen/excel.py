@@ -28,6 +28,10 @@ EXCLUDE_FEATURE_TERMS = [
     "размер ставки",
 ]
 
+PREMATCH_LAST_SCAN_TM_COLUMN = "Прематчевые КФы (последнее сканирование)::ТМ"
+PREMATCH_FIRST_SCAN_TM_COLUMN = "Прематчевые КФы (первое сканирование)::ТМ"
+PREMATCH_TM_FEATURE_NAME = "ТМ (прематч: последнее vs первое)"
+
 DEFAULT_FEATURE_PRIORITY = [
     "Голы",
     "Фолы",
@@ -38,6 +42,7 @@ DEFAULT_FEATURE_PRIORITY = [
     "1 четв",
     "2 четв",
     "Ост таймаут",
+    PREMATCH_TM_FEATURE_NAME,
 ]
 
 
@@ -197,6 +202,18 @@ def detect_feature_pairs(path: Path, header_info: HeaderInfo | None = None, samp
         if any(term in lowered for term in EXCLUDE_FEATURE_TERMS):
             continue
         pairs_meta.append((feature_name, header, away_col))
+
+    if (
+        PREMATCH_LAST_SCAN_TM_COLUMN in header_info.index_by_name
+        and PREMATCH_FIRST_SCAN_TM_COLUMN in header_info.index_by_name
+    ):
+        pairs_meta.append(
+            (
+                PREMATCH_TM_FEATURE_NAME,
+                PREMATCH_LAST_SCAN_TM_COLUMN,
+                PREMATCH_FIRST_SCAN_TM_COLUMN,
+            )
+        )
 
     pairs_meta = list(dict.fromkeys(pairs_meta))
     if not pairs_meta:
